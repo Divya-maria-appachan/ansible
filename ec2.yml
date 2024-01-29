@@ -1,0 +1,113 @@
+---
+- hosts: localhost
+  vars:
+    aws_region: "us-east-1"  
+  tasks:
+    - name: Create Custom VPC
+      amazon.aws.ec2_vpc_net:
+        name: "custom_vpc"
+        cidr_block: "10.0.0.0/16"
+        dns_support: yes
+        dns_hostnames: yes
+        state: present  
+        region: "{{ aws_region }}"   
+      register: custom_vpc
+   
+    - name: Create Internet Gateway
+      ec2_vpc_igw:
+        vpc_id: "{{ custom_vpc.vpc.id }}"
+        state: present  
+        region: "{{ aws_region }}"  
+        tags:
+          Name: custom_igw
+      register: custom_igw
+      
+
+
+    - name: Create Public Subnet
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ custom_vpc.vpc.id }}"
+        cidr: "10.0.1.0/24"
+        map_public: yes
+        region: "{{ aws_region }}"  
+        tags:
+          Name: public_subnet
+      register: public_subnet
+
+    - name: Create Private Subnet
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ custom_vpc.vpc.id }}"
+        region: "{{ aws_region }}"  
+        cidr: "10.0.2.0/24"
+        tags:
+          Name: private_subnet
+      register: private_subnet
+
+    - name: Create Public Security Group
+      ec2_group:
+        name: public_security_group
+        description: "Allow HTTP and SSH traffic for public subnet"
+        vpc_id: "{{ custom_vpc.vpc.id }}"
+        region: "{{ aws_region }}"   
+        rules:
+          - proto: tcp
+            ports: 
+            -  80  
+            cidr_ip: "0.0.0.0/0"
+          - proto: tcp
+            ports: 
+            - 22
+            cidr_ip: "0.0.0.0/0"
+      register: public_sg
+
+    - name: Create Private Security Group
+      ec2_group:
+        name: private_security_group
+        description: "Allow outgoing traffic for private subnet"
+        vpc_id: "{{ custom_vpc.vpc.id }}"
+        region: "{{ aws_region }}"  
+      register: private_sg
+
+    - name: Create Public Route Table
+      ec2_vpc_route_table:
+        vpc_id: "{{ custom_vpc.vpc.id }}"
+        region: "{{ aws_region }}"  
+        routes:
+          - dest: "0.0.0.0/0"
+            gateway_id: "{{ custom_igw.gateway_id }}"
+        tags:
+          Name: public_route_table
+        subnets: [ "{{ public_subnet.subnet.id }}" ]    
+      register: public_route_table
+
+
+    - name: Launch EC2 Instance
+      community.aws.ec2_instance:
+        key_name: "web"
+        instance_type: "t2.micro"
+        wait: yes
+        image_id: "ami-046eeba8a7f7bbefd"  
+        region: "{{ aws_region }}"  
+        vpc_subnet_id: "{{ public_subnet.subnet.id }}"
+        security_group: "{{ public_sg.group_id }}"  
+        user_data: |
+          #cloud-config
+          runcmd:
+            - sudo yum update -y
+            - sudo yum install -y httpd
+            - sudo systemctl start httpd
+            - sudo systemctl enable httpd
+            - sudo mkdir -p /var/www/html
+            - sudo wget https://github.com/learning-zone/website-templates/archive/master.zip
+            - sudo unzip master.zip
+            - sudo cp -r website-templates-master/victory-educational-institution-free-html5-bootstrap-template/* /var/www/html/
+            - sudo chown -R apache:apache /var/www/html
+            - sudo systemctl restart httpd
+        tags:
+          Name: first
+
+    - name: Output EC2 Public IPv4 Address
+      debug:
+        var: public_subnet.public_ip
