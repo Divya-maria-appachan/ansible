@@ -1,0 +1,116 @@
+---
+- name: Create AWS resources
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    bucket_name: my-s3-bucket
+    lambda_function_name: my_lambda_function
+    dynamodb_table_name: my_dynamodb_table
+    sqs_queue_name: my_sqs_queue
+    sns_topic_name: my_sns_topic
+    sns_subscription_email: divyamariaa7@gmail.com
+    existing_lambda_role_name: LabRole
+
+  tasks:
+    - name: Create S3 bucket
+      amazon.aws.s3_bucket:
+        name: bucketname4325678
+        versioning: true  
+        state: present
+      register: s3_bucket
+
+    - name: Ensure S3 bucket exists
+      amazon.aws.s3_bucket:
+        name: bucketname4325678
+        versioning: true
+        state: present
+        public_access:
+          block_public_policy: false
+        region: us-east-1
+    - name: Create bucket with JSON policy
+      amazon.aws.s3_bucket:
+        name: bucketname4325678
+        policy: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": [
+                   "s3:*"
+                ],  
+                "Resource":  [
+                   "arn:aws:s3:::bucketname4325678",
+                   "arn:aws:s3:::bucketname4325678/*"
+                 ]       
+              }
+            ]
+          }
+        
+       
+        region: us-east-1 
+    - name: Retrieve IAM role details
+      community.aws.iam_role_info:
+        name: "{{ existing_lambda_role_name }}"
+      register: lambda_role
+    
+
+    - name: Create Lambda function
+      lambda:
+        name: "{{ lambda_function_name }}"
+        state: present
+        role: arn:aws:iam::835685039584:role/LabRole
+        handler: lambda_function.handler
+        runtime: python3.8
+        s3_bucket: my2123
+        s3_key: lambda_function.zip  
+        region: us-east-1  
+        
+      register: lambda_function
+
+    - name: Create DynamoDB table
+      dynamodb_table:
+        name: "{{ dynamodb_table_name }}"
+        state: present
+        hash_key_name: id
+        hash_key_type: STRING
+        read_capacity: 5
+        write_capacity: 5
+        region: us-east-1  
+      register: dynamodb_table
+
+  
+    - name: Create SNS topic
+      community.aws.sns_topic:
+        name: "{{ sns_topic_name }}"
+        state: present
+        region: us-east-1  
+      register: sns_topic
+
+    - name: Subscribe to SNS topic
+      community.aws.sns_topic:
+
+        name: "{{ sns_topic_name }}"
+        subscriptions:
+          - endpoint: "my_email_address@example.com"
+            protocol: "email"
+          
+        state: present
+        region: us-east-1  
+      register: sns_subscription
+
+  
+
+    - name: Create Lambda function to trigger SNS
+      lambda:
+        name: "trigger_sns"
+        state: present
+        role: arn:aws:iam::835685039584:role/LabRole
+        handler: trigger_sns.handler
+        runtime: python3.8
+        s3_bucket: my2123
+        s3_key: lambda_function1.zip
+        region: us-east-1
